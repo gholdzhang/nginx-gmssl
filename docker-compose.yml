@@ -1,0 +1,15 @@
+version: "3"
+services:
+  nginx-gmssl:
+    container_name: nginx-gmssl
+    image: nginx-gmssl:1.18.0
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - 10001:80
+      - 10002:443
+    volumes:
+      - ./certs:/certs
+      - ./nginx.conf:/usr/local/nginx/conf/nginx.conf
