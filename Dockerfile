@@ -48,6 +48,7 @@ ENV LD_LIBRARY_PATH /usr/local/gmssl/lib
 ENV PATH /usr/local/nginx/sbin:/usr/local/gmssl/bin:$PATH
 
 EXPOSE 80
+EXPOSE 443
 
 STOPSIGNAL SIGTERM
 

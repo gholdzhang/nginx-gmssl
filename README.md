@@ -1,5 +1,90 @@
 # nginx-gmssl
 
+## 镜像说明
+
+ngxin目录在`/usr/local/nginx`,公开的volumes:
+
+- /usr/local/nginx/html : nginx默认的html文件目录
+- /usr/local/nginx/conf : nginx配置文件目录
+- /certs : 存放证书的目录
+
+### 部署示例
+
+docker-compose.yml
+
+```yaml
+version: "3"
+services:
+  nginx-gmssl:
+    container_name: nginx-gmssl
+    image: nginx-gmssl:1.18.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - 10001:80
+      - 10002:443
+    volumes:
+      # 证书目录
+      - ./certs:/certs
+      # nginx配置文件
+      - ./nginx.conf:/usr/local/nginx/conf/nginx.conf
+```
+
+nginx.conf
+
+```conf
+worker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    sendfile        on;
+    keepalive_timeout  65;
+    # HTTP
+    server {
+        listen       80;
+        listen       [::]:80;
+        server_name  localhost;
+
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   html;
+        }
+    }
+    # HTTPS
+    server {
+       listen       443 ssl;
+       server_name  localhost;
+       # 证书
+       ssl_certificate      /certs/user.crt;
+       ssl_certificate_key  /certs/user.key;
+
+       ssl_session_cache    shared:SSL:1m;
+       ssl_session_timeout  5m;
+
+       ssl_ciphers  HIGH:!aNULL:!MD5;
+       ssl_prefer_server_ciphers  on;
+
+       location / {
+           root   html;
+           index  index.html index.htm;
+       }
+    }
+
+}
+```
+
 ## 用gmssl命令生成sm2证书
 
 生成SM2私钥及证书请求
@@ -14,6 +99,8 @@ gmssl req -new -key user.key -out user.req
 ```sh
 gmssl x509 -req -days 36500 -sm3 -in user.req -signkey user.key -out user.crt
 ```
+
+生成的证书即可应用于上方.
 
 ### 证书转换
 
@@ -50,125 +137,3 @@ gmssl x509 -in user.cer -inform der -text -noout
 ```
 
 参考: [那些证书相关的玩意儿(SSL,X.509,PEM,DER,CRT,CER,KEY,CSR,P12等)](https://www.cnblogs.com/guogangj/p/4118605.html)
-
----
-
-## 用gmssl制作国密SM2证书
-
-以下做出的证书都是：Signature Algorithm: sm2sign-with-sm3
-
-创建demoCA目录，在demoCA目录下执行：
-
-```sh
-mkdir certs crl newcerts private
-
-touch index.txt
-
-echo "01" > serial
-```
-
-将通过以下自签名生成的cacert.pem放到demoCA目录下，cakey.pem放到demoCA/private
-
-创建公私钥和证书请求：
-
-```sh
-gmssl ecparam -genkey -name sm2p256v1 -out cakey.pem
-
-gmssl req -new -sm3 -key cakey.pem -out cacsr.pem
-```
-
-自签名
-
-```sh
-gmssl req -x509 -sm3 -days 3650 -key cakey.pem -in cacsr.pem -out cacert.pem
-```
-
-ca签名（在demoCA的父目录下执行）
-
-```sh
-gmssl ca -md sm3 -in client_csr.pem -out client_cert.pem -days 3650
-```
-
-显示证书信息：
-
-```sh
-gmssl x509 -text -noout -in cacert.pem
-
-gmssl req -in cacsr.pem -noout -text
-```
-
-证书通信测试命令
-
-SERVER:
-
-```sh
-gmssl s_server -key server_key.pem -cert server_cert.pem -CAfile cacert.pem -cipher ECDHE-SM4-SM3 -verify 1
-```
-
-CLIENT:
-
-```sh
-gmssl s_client -key client_key.pem -cert client_cert.pem -CAfile cacert.pem -cipher ECDHE-SM4-SM3 -verify 1
-```
-
----
-
-## 基于nginx镜像构建(失败)
-
-```sh
-# 从nginx构建容器 1.17.10
-docker run --name nginx-gmssl -d -p 10001:80 -p 10002:443 nginx:latest
-# 查看版本
-cat /etc/os-release
-# 更改源:添加163镜像源
-echo "deb http://mirrors.163.com/debian/ stretch main non-free contrib" >> /etc/apt/sources.list.d/163.list \
-&& echo "deb http://mirrors.163.com/debian/ stretch-updates main non-free contrib" >> /etc/apt/sources.list.d/163.list \
-&& echo "deb http://mirrors.163.com/debian/ stretch-backports main non-free contrib" >> /etc/apt/sources.list.d/163.list \
-&& echo "deb-src http://mirrors.163.com/debian/ stretch main non-free contrib" >> /etc/apt/sources.list.d/163.list \
-&& echo "deb-src http://mirrors.163.com/debian/ stretch-updates main non-free contrib" >> /etc/apt/sources.list.d/163.list \
-&& echo "deb-src http://mirrors.163.com/debian/ stretch-backports main non-free contrib" >> /etc/apt/sources.list.d/163.list \
-&& echo "deb http://mirrors.163.com/debian-security/ stretch/updates main non-free contrib" >> /etc/apt/sources.list.d/163.list \
-&& echo "deb-src http://mirrors.163.com/debian-security/ stretch/updates main non-free contrib" >> /etc/apt/sources.list.d/163.list
-# update
-apt-get update
-# wget安装
-apt-get install wget
-# unzip安装
-apt-get install unzip
-# 在root目录下
-cd ~
-# 下载GmSSL源码
-wget -O gmssl.zip https://github.com/guanzhi/GmSSL/archive/master.zip
-# 解压缩,解压缩到了GmSSL-master目录中,或者解压到指定目录 unzip -o gmssl.zip -d ./gmssl/
-unzip -o gmssl.zip
-# 下载nginx源码
-wget -O nginx-1.18.0.tar.gz https://nginx.org/download/nginx-1.18.0.tar.gz
-
-# 解压nginx,或者解压到指定目录 tar -zxvf ./nginx-1.18.0.tar.gz -C ./nginx
-tar -zxvf ./nginx-1.18.0.tar.gz
-```
-
-## 基于centos8镜像构建
-
-```sh
-docker run -it --name  centos8 -d -p 10001:80 -p 10002:443 centos:8 /bin/bash
-yum update -y
-yum -y install epel-release wget gcc gcc-c++ glibc make autoconf openssl openssl-devel pcre-devel libxslt-devel gd-devel unzip tar
-
-mkdir /nginx_gmsslg
-cd /nginx_gmssl/
-wget -O gmssl.zip https://github.com/guanzhi/GmSSL/archive/master.zip && unzip -o gmssl.zip && wget -O nginx-1.18.0.tar.gz https://nginx.org/download/nginx-1.18.0.tar.gz && tar -zxvf ./nginx-1.18.0.tar.gz
-
-# 编译GmSSL
-cd GmSSL-master/
-./config #--prefix=/usr/local/gmssl --openssldir=/usr/local/gmssl
-make
-make install
-# 添加环境变量
-# export LD_LIBRARY_PATH=/usr/local/lib64
-echo "export LD_LIBRARY_PATH=/usr/local/lib64" >> /etc/profile
-# 是否将gmssl添加进环境变量PATH中?待确认
-gmssl version -a
-
-# 编译nginx ,参见https://www.zybuluo.com/guog/note/1697005
-```
